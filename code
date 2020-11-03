@@ -1,0 +1,285 @@
+let video;
+let poseNet;
+let poses = [];
+
+
+function setup() {
+  ground = 500;
+  g = 0.98;
+  velocity = 8;
+  score = 0;
+  Restart = false;
+
+  dinosaur = new Dinosaur();
+  obstacleManager = new ObstacleManager();
+
+  createCanvas(640, 480);
+
+  video = createCapture(VIDEO);
+  video.size(width, height);
+
+  // Create a new poseNet method with a single detection
+  poseNet = ml5.poseNet(video, modelReady);
+  // This sets up an event that fills the global variable "poses"
+  // with an array every time new poses are detected
+  poseNet.on('pose', function(results) {
+    poses = results;
+  });
+  // Hide the video element, and just show the canvas
+  video.hide();
+}
+
+function ballDraw() {
+  obstacleManager.update();
+  dinosaur.move();
+  result = judgeCollision(dinosaur, obstacleManager.obstacles);
+  if (result == true || (score == 100 && dinosaur.y == ground - dinosaur.height / 2)) {
+    gameOver();
+    Restart = true;
+  } else {
+    score += countScore(dinosaur, obstacleManager.obstacles);
+    background(255, 255, 255, 90);
+    //clear();
+    stroke(0);
+    strokeWeight(1);
+    line(10, ground - 10, width - 10, ground - 10);
+    obstacleManager.display();
+    dinosaur.display();
+    fill(0);
+    noStroke();
+    text('score: ' + str(score), 10, 15);
+  }
+
+}
+
+function judgeCollision(dinosaur, obstacles) {
+  for (let i = 0; i < obstacles.length; i++) {
+    let collide = undefined;
+    let left = obstacles[i].x - obstacles[i].width / 2;
+    let right = obstacles[i].x + obstacles[i].width / 2;
+    let top = obstacles[i].y - obstacles[i].height / 2;
+    let bottom = obstacles[i].y + obstacles[i].height / 2;
+    let w1 = abs(dinosaur.x - obstacles[i].x);
+    let h1 = abs(dinosaur.y - obstacles[i].y);
+    let w2 = min(abs(left - dinosaur.x), abs(dinosaur.x - right));
+    let h2 = min(abs(top - dinosaur.y), abs(bottom - dinosaur.y));
+
+    if ((w2 >= dinosaur.width / 2 && !(dinosaur.x > left && dinosaur.x < right)) || (h2 >= dinosaur.height / 2 && !(dinosaur.y < bottom && dinosaur.y > top))) {
+      collide = false;
+    } else {
+      if (w1 < obstacles[i].width / 2 || h1 < obstacles[i].height / 2) {
+        collide = true;
+      } else {
+
+        if ((w2 * w2 + h2 * h2) < (dinosaur.width / 2) * (dinosaur.width / 2)) {
+          collide = true;
+        } else {
+          collide = false;
+        }
+      }
+    }
+    if (collide) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function countScore(dinosaur, obstacles) {
+  let sc = 0;
+
+  for (let i = 0; i < obstacles.length; i++) {
+    if (obstacles[i].jumped == false) {
+      let dist1d = dinosaur.x - obstacles[i].x;
+
+      if (dist1d > 0) {
+        sc += 10;
+        obstacles[i].jumped = true;
+      }
+    }
+  }
+  return sc;
+}
+
+function gameOver() {
+  fill(0);
+  text('GameOver. Your score: ' + str(score), width / 2, height / 2);
+  text("Press r to restart.", width / 2, 20 + height / 2);
+  noLoop(); 
+}
+
+function keyPressed() {
+
+  if (key === 'r' && Restart) {
+    Restart = false;
+    restart();
+  }
+}
+
+function restart() {
+
+  score = 0;
+  obstacleManager.reset();
+  dinosaur.reset();
+  loop();
+}
+
+class RectObstacle {
+  constructor(x, y, w, h) {
+    this.x = x;
+    this.y = y;
+    this.width = w;
+    this.height = h;
+    this.jumped = false;
+  }
+  show() {
+    noStroke();
+    fill(0, 255, 0);
+    rect(this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+  }
+}
+
+class RectObstacleFactory {
+  constructor() {}
+  instantiate() {
+    let x = width
+    let w = floor(random(20, 40));
+    let h = floor(w * 2.44);
+    let y = floor(random(-10, 15)) + ground - h / 2;
+    return new RectObstacle(x, y, w, h);
+  }
+}
+
+class ObstacleManager {
+  constructor() {
+    this.obstacleFactory = new RectObstacleFactory();
+    this.obstacles = [];
+    this.leftBoundary = 0;
+    this.velocity = velocity - 2;
+  }
+
+  update() {
+    this.generateObstacle();
+    let i = 0;
+    while (i < this.obstacles.length) {
+      this.obstacles[i].x -= this.velocity;
+      if (this.obstacles[i].x < this.leftBoundary - this.obstacles[i].width / 2) {
+        delete this.obstacles[i];
+        this.obstacles.splice(i, 1);
+      } else {
+        i++;
+      }
+    }
+  }
+
+  generateObstacle() {
+    if (random(1) < 0.05) {
+      if (this.obstacles.length == 0 || ((width - this.obstacles[this.obstacles.length - 1].x) > 300)) {
+        let obstacle = this.obstacleFactory.instantiate();
+        this.obstacles.push(obstacle);
+      }
+    }
+
+  }
+
+  display() {
+    for (let i = 0; i < this.obstacles.length; i++) {
+      this.obstacles[i].show()
+    }
+  }
+  reset() {
+    let i = 0;
+    while (i < this.obstacles.length) {
+      delete this.obstacles[i];
+      this.obstacles.splice(i, 1);
+    }
+  }
+}
+
+class Dinosaur {
+  constructor() {
+    this.x = 150;
+    this.y = ground - 100;
+    this.width = 70;
+    this.height = 70;
+    this.a = 0;
+    this.v = 0;
+  }
+
+  move() {
+
+    if (this.y >= ground - this.height / 2) {
+
+      if (keyIsDown(UP_ARROW) || mouseIsPressed || (poses[0] && poses[0].pose.nose.y < 400)) {
+        this.a = 20 * g;
+      } else {
+        this.a = 0;
+        this.v = 0;
+      }
+    } else {
+      this.a = -g;
+    }
+    this.v += this.a;
+    this.y -= this.v;
+    this.y = constrain(this.y, 0, ground - this.height / 2);
+  }
+  display() {
+    fill(222, 222, 0);
+    noStroke();
+    ellipse(this.x, this.y, this.width, this.height);
+  }
+  reset() {
+    this.x = 150;
+    this.y = ground - 100;
+    this.a = 0;
+    this.v = 0;
+  }
+}
+
+function modelReady() {
+  select('#status').html('Model Loaded');
+}
+
+function draw() {
+  image(video, 0, 0, width, height);
+
+  // We can call both functions to draw all keypoints and the skeletons
+  drawKeypoints();
+  drawSkeleton();
+
+  ballDraw();
+}
+
+// A function to draw ellipses over the detected keypoints
+function drawKeypoints() {
+  // Loop through all the poses detected
+  for (let i = 0; i < poses.length; i++) {
+    // For each pose detected, loop through all the keypoints
+    let pose = poses[i].pose;
+    for (let j = 0; j < pose.keypoints.length; j++) {
+      // A keypoint is an object describing a body part (like rightArm or leftShoulder)
+      let keypoint = pose.keypoints[j];
+      // Only draw an ellipse is the pose probability is bigger than 0.2
+      if (keypoint.score > 0.2) {
+        fill(255, 0, 0);
+        noStroke();
+        ellipse(keypoint.position.x, keypoint.position.y, 10, 10);
+      }
+    }
+  }
+}
+
+// A function to draw the skeletons
+function drawSkeleton() {
+  // Loop through all the skeletons detected
+  for (let i = 0; i < poses.length; i++) {
+    let skeleton = poses[i].skeleton;
+    // For every skeleton, loop through all body connections
+    for (let j = 0; j < skeleton.length; j++) {
+      let partA = skeleton[j][0];
+      let partB = skeleton[j][1];
+      stroke(255, 0, 0);
+      line(partA.position.x, partA.position.y, partB.position.x, partB.position.y);
+    }
+  }
+}
